@@ -37,27 +37,37 @@ const userSchema = new Schema({
         required: [true, "Password is required"],
         unique: true,
     },
-    watchHistory: {
-        type: Schema.Types.ObjectId,
-        ref: "Video",
-    },
+    watchHistory: [
+        {
+            type: Schema.Types.ObjectId,
+            ref: "Video",
+        }
+    ],
     refreshToken: {
         type: String,
     }
 }, { timestamps: true });
 
 // Pre-save middleware: runs before saving user document
-userSchema.pre("save", async function (next) {
-    // If password is NOT modified, skip hashing
-    if (!this.isModified("password")) return next();
+// userSchema.pre("save", async function (next) {
+//     // If password is NOT modified, skip hashing
+//     if (!this.isModified("password")) return next();
 
-    // Hash the password
-    this.password = await bcrypt.hash(this.password, 10);
-    next();
+//     // Hash the password
+//     this.password = await bcrypt.hash(this.password, 10);
+//     next();
+// });
+
+userSchema.pre("save", async function () {
+    // 'this' refers to the document
+    if (this.isModified("password")) {
+        this.password = await bcrypt.hash(this.password, 10);
+    }
 });
 
+
 // custom method to check password
-userSchema.methods.isPasswrodCorrect = async function (password) {
+userSchema.methods.isPasswordCorrect = async function (password) {
     return await bcrypt.compare(password, this.password);
 }
 

@@ -26,7 +26,7 @@ const registerUser = asyncHandler(async (req, res) => {
     ) {
         return res.status(400).json({
             success: false,
-            message: "fill all the fileds"
+            message: "fill all the fields"
         })
     }
 
@@ -43,11 +43,16 @@ const registerUser = asyncHandler(async (req, res) => {
     }
 
     // step 4 : check for images, check for avatar
-    const avatarLocalPath = req.files?.avatar[0]?.path;
-    const coverImageLocalPath = req.files?.coverImage[0]?.path;
+    const avatarLocalPath = req.files?.avatar?.[0]?.path;
+    // const coverImageLocalPath = req.files?.coverImage?.[0]?.path;
+
+    let coverImageLocalPath;
+    if (req.files && Array.isArray(req.files.coverImage) && req.files.coverImage.length > 0) {
+        coverImageLocalPath = req.files.coverImage[0].path
+    }
 
     if (!avatarLocalPath) {
-        res.status(400).json({
+        return res.status(400).json({
             success: false,
             message: "Avatar is required"
         })
@@ -55,24 +60,25 @@ const registerUser = asyncHandler(async (req, res) => {
 
     // step 5 : upload them to cloudinary, avatar
     const avatar = await uploadOnCloudinary(avatarLocalPath);
+
     const coverImage = await uploadOnCloudinary(coverImageLocalPath);
 
-    if (!avatar) {
-        res.status(400).json({
+    if (!avatar || !avatar.url) {
+        return res.status(400).json({
             success: false,
-            message: "Avatar is required"
-        })
+            message: "Avatar upload failed"
+        });
     }
 
     // step 6 : create user object - create entry in db
     const user = await User.create({
         fullname,
-        avatar: avatar.url,
-        coverImage: coverImage?.url || "",
-        email,
+        username: username.toLowerCase(),
+        email: email.toLowerCase().trim(),
         password,
-        username: username.toLowerCase()
-    })
+        avatar: avatar.url,
+        coverImage: coverImage?.url || ""
+    });
 
     // step 7 : check user is created or not and also remove password and refreshToken
     const createdUser = await User.findById(user._id).select(
@@ -81,7 +87,7 @@ const registerUser = asyncHandler(async (req, res) => {
 
     // step 8 : check for user creation
     if (!createdUser) {
-        res.status(500).json({
+        return res.status(500).json({
             success: false,
             message: "Something went wrong while registring a user"
         })
@@ -92,7 +98,7 @@ const registerUser = asyncHandler(async (req, res) => {
         success: true,
         message: "User registered successfully",
         user: createdUser
-    })
+    });
 });
 
 export default registerUser;
