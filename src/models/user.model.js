@@ -35,7 +35,6 @@ const userSchema = new Schema({
     password: {
         type: String,
         required: [true, "Password is required"],
-        unique: true,
     },
     watchHistory: [
         {
@@ -49,22 +48,11 @@ const userSchema = new Schema({
 }, { timestamps: true });
 
 // Pre-save middleware: runs before saving user document
-// userSchema.pre("save", async function (next) {
-//     // If password is NOT modified, skip hashing
-//     if (!this.isModified("password")) return next();
-
-//     // Hash the password
-//     this.password = await bcrypt.hash(this.password, 10);
-//     next();
-// });
-
 userSchema.pre("save", async function () {
-    // 'this' refers to the document
     if (this.isModified("password")) {
         this.password = await bcrypt.hash(this.password, 10);
     }
 });
-
 
 // custom method to check password
 userSchema.methods.isPasswordCorrect = async function (password) {
@@ -72,10 +60,8 @@ userSchema.methods.isPasswordCorrect = async function (password) {
 }
 
 // Custom method to generate JWT access token
-// Access token is short-lived and used for authenticating API requests
 userSchema.methods.generateAccessToken = function () {
     return jwt.sign(
-        // Payload: data you want to store inside the token
         {
             _id: this._id,
             email: this.email,
@@ -83,29 +69,22 @@ userSchema.methods.generateAccessToken = function () {
             fullname: this.fullname,
         },
 
-        // Secret key used to sign the access token
         process.env.ACCESS_TOKEN_SECRET,
-
-        // Token expiry time
         {
             expiresIn: process.env.ACCESS_TOKEN_EXPIRY,
-        }
+        },
     )
 }
 
 // Custom method to generate JWT refresh token
-// Refresh token is long-lived and used to generate new access tokens
 userSchema.methods.generateRefreshToken = function () {
     return jwt.sign(
-        // Payload: minimal data for security
         {
             _id: this._id,
         },
 
-        // Secret key used to sign the refresh token
         process.env.REFRESH_TOKEN_SECRET,
-
-        // Token expiry time
+        console.log("refresh", process.env.REFRESH_TOKEN_SECRET),
         {
             expiresIn: process.env.REFRESH_TOKEN_EXPIRY,
         }

@@ -1,40 +1,52 @@
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { User } from "../models/user.model.js";
 import { uploadOnCloudinary } from "../utils/cloudinary.js";
+import jwt from "jsonwebtoken";
 
-// register/ signUp controller
+// create method to generate access and refresh token
+const generateAccessAndRefreshToken = async (userId) => {
+    try {
+        // find user in database using userId
+        const user = await User.findById(userId);
+
+        if (!user) {
+            throw new Error("User not found while generating tokens");
+        }
+
+        // generate access token using user model method
+        const accessToken = await user.generateAccessToken();
+
+        // generate refresh token using user model method
+        const refreshToken = await user.generateRefreshToken();
+
+        // store refresh token in database for future validation
+        user.refreshToken = refreshToken;
+
+        // save user without running validations again
+        await user.save({ validateBeforeSave: false })
+
+        // return both tokens
+        return { accessToken, refreshToken }
+
+    } catch (error) {
+        throw new Error(
+            "Something went wrong while generating access and refresh token"
+        )
+    }
+}
+
+// register/signUp controller
 const registerUser = asyncHandler(async (req, res) => {
-    // get user details form frontend
-    // validation - not empty
-    // check if user already exists
-    // check for images, check for avatar
-    // upload them to cloudinary, avatar
-    // create user object - create entry in db
-    // remove password and refresh tokenn field from response
-    // check for user creation
-    // return res
-
-    // step 1 : get data from frontend through req.body
     const { fullname, username, email, password } = req.body;
 
-    // step 2 : validation
-    if (
-        !fullname?.trim() ||
-        !username?.trim() ||
-        !email?.trim() ||
-        !password?.trim()
-    ) {
+    if (!fullname?.trim() || !username?.trim() || !email?.trim() || !password?.trim()) {
         return res.status(400).json({
             success: false,
             message: "fill all the fields"
         })
     }
 
-    // step 3 : check if user already exists
-    const existedUser = await User.findOne({
-        $or: [{ email }, { username }]
-    })
-
+    const existedUser = await User.findOne({ $or: [{ email }, { username }] })
     if (existedUser) {
         return res.status(409).json({
             success: false,
@@ -42,10 +54,7 @@ const registerUser = asyncHandler(async (req, res) => {
         })
     }
 
-    // step 4 : check for images, check for avatar
     const avatarLocalPath = req.files?.avatar?.[0]?.path;
-    // const coverImageLocalPath = req.files?.coverImage?.[0]?.path;
-
     let coverImageLocalPath;
     if (req.files && Array.isArray(req.files.coverImage) && req.files.coverImage.length > 0) {
         coverImageLocalPath = req.files.coverImage[0].path
@@ -58,9 +67,7 @@ const registerUser = asyncHandler(async (req, res) => {
         })
     }
 
-    // step 5 : upload them to cloudinary, avatar
     const avatar = await uploadOnCloudinary(avatarLocalPath);
-
     const coverImage = await uploadOnCloudinary(coverImageLocalPath);
 
     if (!avatar || !avatar.url) {
@@ -70,7 +77,6 @@ const registerUser = asyncHandler(async (req, res) => {
         });
     }
 
-    // step 6 : create user object - create entry in db
     const user = await User.create({
         fullname,
         username: username.toLowerCase(),
@@ -80,12 +86,10 @@ const registerUser = asyncHandler(async (req, res) => {
         coverImage: coverImage?.url || ""
     });
 
-    // step 7 : check user is created or not and also remove password and refreshToken
     const createdUser = await User.findById(user._id).select(
         "-password -refreshToken"
     )
 
-    // step 8 : check for user creation
     if (!createdUser) {
         return res.status(500).json({
             success: false,
@@ -93,7 +97,6 @@ const registerUser = asyncHandler(async (req, res) => {
         })
     }
 
-    // step 9 : return the response
     return res.status(201).json({
         success: true,
         message: "User registered successfully",
@@ -101,4 +104,122 @@ const registerUser = asyncHandler(async (req, res) => {
     });
 });
 
-export default registerUser;
+// login controller
+const loginUser = asyncHandler(async (req, res) => {
+    const { username, email, password } = req.body;
+
+    if (!(username || email)) {
+        return res.status(400).json({
+            success: false,
+            message: "username or email is required!"
+        })
+    }
+
+    const user = await User.findOne({ $or: [{ email }, { username }] })
+    if (!user) {
+        return res.status(404).json({
+            success: false,
+            message: "user not found register first!"
+        })
+    }
+
+    const isPasswordValid = await user.isPasswordCorrect(password)
+    if (!isPasswordValid) {
+        return res.status(401).json({
+            success: false,
+            message: "Invalid credentials!"
+        })
+    }
+
+    const { accessToken, refreshToken } = await generateAccessAndRefreshToken(user._id);
+
+    const loggedInUser = await User.findById(user._id)
+        .select("-password -refreshToken")
+
+    const options = {
+        httpOnly: true,
+        secure: true,
+    }
+
+    return res
+        .status(200)
+        .cookie("accessToken", accessToken, options)
+        .cookie("refreshToken", refreshToken, options)
+        .json({
+            success: true,
+            message: "Login successfully !",
+            user: loggedInUser
+        })
+});
+
+// logout controller
+const logoutUser = asyncHandler(async (req, res) => {
+    await User.findByIdAndUpdate(
+        req.user._id,
+        { $set: { refreshToken: undefined } },
+        { new: true }
+    )
+
+    const options = {
+        httpOnly: true,
+        secure: true,
+    }
+
+    return res
+        .status(200)
+        .clearCookie("accessToken", options)
+        .clearCookie("refreshToken", options)
+        .json({
+            success: true,
+            message: "User logged Out successfully!"
+        })
+})
+
+const refreshAccessToken = asyncHandler(async (req, res) => {
+    const incomingRefreshToken = req.cookies.refreshToken || req.body.refreshToken;
+
+    if (!incomingRefreshToken) {
+        return res.status(401).json({ success: false, message: "Unauthorized request!" });
+    }
+
+    let decodedToken;
+    try {
+        decodedToken = jwt.verify(incomingRefreshToken, process.env.REFRESH_TOKEN_SECRET);
+    } catch (err) {
+        return res.status(401).json({ success: false, message: "Invalid or expired refresh token!" });
+    }
+
+    const user = await User.findById(decodedToken?._id)
+
+    if (!user) {
+        throw new Error(401, "Invalid refresh token!")
+    }
+
+    if (incomingRefreshToken !== user.refreshToken) {
+        return res.status(401).json({ success: false, message: "Refresh token is expired or already used!" });
+    }
+
+    const { accessToken, refreshToken } = await generateAccessAndRefreshToken(user._id);
+
+    const options = {
+        httpOnly: true,
+        secure: true
+    }
+
+    return res
+        .status(200)
+        .cookie("accessToken", accessToken, options)
+        .cookie("refreshToken", refreshToken, options)
+        .json({
+            success: true,
+            accessToken,
+            refreshToken
+        });
+})
+
+export {
+    registerUser,
+    loginUser,
+    logoutUser,
+    refreshAccessToken
+}
