@@ -4,14 +4,12 @@ import mongoose, { Schema } from "mongoose";
 const subscriptionSchema = new Schema(
     {
         subscriber: {
-            type: String,
-            required: true,
-            unique: true,
+            type: Schema.Types.ObjectId, // one who is subscribing
+            ref: "User",
         },
         chanel: {
-            type: String,
-            required: true,
-            unique: true
+            type: Schema.Types.ObjectId, // one to whome subscriber is subscribing
+            ref: "User",
         },
     },
     {
